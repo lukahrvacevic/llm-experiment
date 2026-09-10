@@ -200,13 +200,25 @@ def write_matrix_summary(
 
 
 def create_bundle(bundle_path: Path, summary_path: Path, runs_root: Path, rows: list[dict[str, Any]]) -> None:
+    generation_files = (
+        "generations.json",
+        "processed_generations.jsonl",
+        "task_metrics.jsonl",
+        "task_index.jsonl",
+        "run_config.json",
+        "pre_eval_summary.json",
+        "generation_timing.json",
+    )
     temporary_path = bundle_path.with_suffix(bundle_path.suffix + ".tmp")
     with tarfile.open(temporary_path, "w:gz") as archive:
         archive.add(summary_path, arcname=summary_path.name)
         for row in rows:
             run_dir = runs_root / str(row["run_dir"])
             if run_dir.exists() and row.get("status") in {"completed", "skipped_existing"}:
-                archive.add(run_dir, arcname=run_dir.name)
+                for filename in generation_files:
+                    source = run_dir / filename
+                    if source.exists():
+                        archive.add(source, arcname=f"{run_dir.name}/{filename}")
     temporary_path.replace(bundle_path)
 
 

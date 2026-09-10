@@ -16,6 +16,7 @@ TASK_LIMIT="${TASK_LIMIT:-30}"
 NUM_RETURN_SEQUENCES="${NUM_RETURN_SEQUENCES:-5}"
 RUN_PREFIX="${RUN_PREFIX:-fmle-generation30}"
 PULL_MODELS="${PULL_MODELS:-1}"
+INSTALL_OLLAMA="${INSTALL_OLLAMA:-1}"
 
 export HF_HOME="${HF_HOME:-${FMLE_STORAGE_ROOT}/hf-cache}"
 export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-${HF_HOME}/datasets}"
@@ -23,6 +24,7 @@ export HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-0}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-0}"
 export OLLAMA_MODELS="${OLLAMA_MODELS:-${FMLE_STORAGE_ROOT}/ollama-models}"
 export OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
+OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://${OLLAMA_HOST}}"
 export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
 export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
 
@@ -42,8 +44,16 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 if ! command -v ollama >/dev/null 2>&1; then
-  echo "ollama is required; install it before running this script" >&2
-  exit 1
+  if [[ "${INSTALL_OLLAMA}" != "1" ]]; then
+    echo "ollama is required (or run with INSTALL_OLLAMA=1)" >&2
+    exit 1
+  fi
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "curl is required for automatic Ollama installation" >&2
+    exit 1
+  fi
+  echo "Installing Ollama"
+  curl -fsSL https://ollama.com/install.sh | sh
 fi
 
 mkdir -p "${HF_DATASETS_CACHE}" "${OLLAMA_MODELS}" "${RUNS_ROOT}"
@@ -105,7 +115,7 @@ cd "${PROJECT_ROOT}"
   --temperature 0.2 \
   --top-p 0.95 \
   --seed 42 \
-  --ollama-base-url "http://${OLLAMA_HOST}" \
+  --ollama-base-url "${OLLAMA_BASE_URL}" \
   --ollama-keep-alive "${OLLAMA_KEEP_ALIVE}" \
   --session-start-epoch "${SESSION_START_EPOCH}"
 
