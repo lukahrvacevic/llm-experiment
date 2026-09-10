@@ -23,6 +23,9 @@ export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-${HF_HOME}/datasets}"
 export HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-0}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-0}"
 export OLLAMA_MODELS="${OLLAMA_MODELS:-${FMLE_STORAGE_ROOT}/ollama-models}"
+OLLAMA_RUNTIME_DIR="${OLLAMA_RUNTIME_DIR:-${FMLE_STORAGE_ROOT}/ollama-runtime}"
+export PATH="${OLLAMA_RUNTIME_DIR}/bin:${PATH}"
+export LD_LIBRARY_PATH="${OLLAMA_RUNTIME_DIR}/lib/ollama:${LD_LIBRARY_PATH:-}"
 export OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://${OLLAMA_HOST}}"
 export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
@@ -43,19 +46,6 @@ if ! command -v python3 >/dev/null 2>&1; then
   echo "python3 is required" >&2
   exit 1
 fi
-if ! command -v ollama >/dev/null 2>&1; then
-  if [[ "${INSTALL_OLLAMA}" != "1" ]]; then
-    echo "ollama is required (or run with INSTALL_OLLAMA=1)" >&2
-    exit 1
-  fi
-  if ! command -v curl >/dev/null 2>&1; then
-    echo "curl is required for automatic Ollama installation" >&2
-    exit 1
-  fi
-  echo "Installing Ollama"
-  curl -fsSL https://ollama.com/install.sh | sh
-fi
-
 mkdir -p "${HF_DATASETS_CACHE}" "${OLLAMA_MODELS}" "${RUNS_ROOT}"
 
 if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
@@ -63,6 +53,21 @@ if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
 fi
 "${VENV_DIR}/bin/python" -m pip install --upgrade pip
 "${VENV_DIR}/bin/python" -m pip install -r "${PROJECT_ROOT}/requirements-baseline.txt"
+
+if ! command -v ollama >/dev/null 2>&1; then
+  if [[ "${INSTALL_OLLAMA}" != "1" ]]; then
+    echo "ollama is required (or run with INSTALL_OLLAMA=1)" >&2
+    exit 1
+  fi
+  echo "Installing Ollama without sudo into ${OLLAMA_RUNTIME_DIR}"
+  "${VENV_DIR}/bin/python" -m repoexec_baseline.install_ollama_user \
+    --install-dir "${OLLAMA_RUNTIME_DIR}"
+fi
+
+if ! command -v ollama >/dev/null 2>&1; then
+  echo "Ollama installation completed but the binary is not available in PATH" >&2
+  exit 1
+fi
 
 OLLAMA_PID=""
 cleanup() {

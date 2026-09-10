@@ -105,7 +105,7 @@ Glavni izlazi su:
 
 ## FMLe generation-only run
 
-`run_fmle_generation.sh` je Linux/SSH launcher za generisanje bez Docker evaluacije. Podrazumevano instalira Ollamu ako nije prisutna i pokrece svih osam modela nad prvih 30 `full_context` taskova, za `raw`, `ast` i `reduced_ast`, sa pet kandidata po tasku.
+`run_fmle_generation.sh` je Linux/SSH launcher za generisanje bez Docker evaluacije. Podrazumevano instalira Ollamu bez `sudo` pristupa u `/workspace/ollama-runtime` i pokrece svih osam modela nad prvih 30 `full_context` taskova, za `raw`, `ast` i `reduced_ast`, sa pet kandidata po tasku.
 
 ```bash
 chmod +x run_fmle_generation.sh
