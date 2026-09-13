@@ -28,6 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ollama-timeout-seconds", type=float, default=600.0)
     parser.add_argument("--ollama-keep-alive", default="30m")
     parser.add_argument("--ollama-num-ctx", type=int, default=None)
+    parser.add_argument("--ollama-parallel-requests", type=int, default=1)
     parser.add_argument("--execution-timeout", type=float, default=120.0)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--run-prefix-ast", default="matrix100-pass5-full-ast-q4")
@@ -74,6 +75,8 @@ def build_command(args: argparse.Namespace, representation: str, run_prefix: str
         str(args.ollama_timeout_seconds),
         "--ollama-keep-alive",
         args.ollama_keep_alive,
+        "--ollama-parallel-requests",
+        str(args.ollama_parallel_requests),
         "--execution-timeout",
         str(args.execution_timeout),
     ]

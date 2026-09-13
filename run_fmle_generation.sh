@@ -13,10 +13,13 @@ fi
 RUNS_ROOT="${RUNS_ROOT:-${FMLE_STORAGE_ROOT}/repoexec-runs}"
 TASK_LIMIT="${TASK_LIMIT:-30}"
 NUM_RETURN_SEQUENCES="${NUM_RETURN_SEQUENCES:-5}"
+OLLAMA_PARALLEL_REQUESTS="${OLLAMA_PARALLEL_REQUESTS:-5}"
+OLLAMA_NUM_CTX="${OLLAMA_NUM_CTX:-4096}"
 RUN_PREFIX="${RUN_PREFIX:-fmle-generation30}"
 PULL_MODELS="${PULL_MODELS:-1}"
 INSTALL_OLLAMA="${INSTALL_OLLAMA:-1}"
 REQUIRE_GPU="${REQUIRE_GPU:-1}"
+RESTART_OLLAMA="${RESTART_OLLAMA:-1}"
 
 export HF_HOME="${HF_HOME:-${FMLE_STORAGE_ROOT}/hf-cache}"
 export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-${HF_HOME}/datasets}"
@@ -30,6 +33,12 @@ export OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://${OLLAMA_HOST}}"
 export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
 export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
+export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-${OLLAMA_PARALLEL_REQUESTS}}"
+export OLLAMA_CONTEXT_LENGTH="${OLLAMA_CONTEXT_LENGTH:-${OLLAMA_NUM_CTX}}"
+
+LOCAL_NO_PROXY="127.0.0.1,localhost"
+export NO_PROXY="${NO_PROXY:+${NO_PROXY},}${LOCAL_NO_PROXY}"
+export no_proxy="${no_proxy:+${no_proxy},}${LOCAL_NO_PROXY}"
 
 MODELS=(
   "qwen2.5-coder:1.5b-base"
@@ -115,6 +124,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
+if [[ "${RESTART_OLLAMA}" == "1" ]] && ollama list >/dev/null 2>&1; then
+  echo "Restarting Ollama so server concurrency settings take effect"
+  pkill -x ollama >/dev/null 2>&1 || true
+  for _ in $(seq 1 30); do
+    if ! ollama list >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+  if ollama list >/dev/null 2>&1; then
+    echo "Could not stop the existing Ollama server; parallel settings were not applied" >&2
+    exit 1
+  fi
+fi
+
 if ! ollama list >/dev/null 2>&1; then
   ollama serve > "${RUNS_ROOT}/${RUN_PREFIX}-ollama.log" 2>&1 &
   OLLAMA_PID="$!"
@@ -132,6 +156,7 @@ if ! ollama list >/dev/null 2>&1; then
 fi
 
 nvidia-smi
+echo "Generation concurrency: client=${OLLAMA_PARALLEL_REQUESTS}, server=${OLLAMA_NUM_PARALLEL}, num_ctx=${OLLAMA_NUM_CTX}"
 
 if [[ "${PULL_MODELS}" == "1" ]]; then
   for model in "${MODELS[@]}"; do
@@ -160,6 +185,8 @@ cd "${PROJECT_ROOT}"
   --seed 42 \
   --ollama-base-url "${OLLAMA_BASE_URL}" \
   --ollama-keep-alive "${OLLAMA_KEEP_ALIVE}" \
+  --ollama-num-ctx "${OLLAMA_NUM_CTX}" \
+  --ollama-parallel-requests "${OLLAMA_PARALLEL_REQUESTS}" \
   --session-start-epoch "${SESSION_START_EPOCH}"
 
 echo "Generation is complete. Stop the FMLe instance after downloading the bundle."

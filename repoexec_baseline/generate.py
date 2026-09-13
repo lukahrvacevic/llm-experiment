@@ -4,6 +4,7 @@ import argparse
 import os
 import random
 from pathlib import Path
+from time import perf_counter
 
 from repoexec_baseline.common import (
     DEFAULT_DATASET,
@@ -37,6 +38,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ollama-timeout-seconds", type=float, default=600.0)
     parser.add_argument("--ollama-keep-alive", default="30m")
     parser.add_argument("--ollama-num-ctx", type=int, default=None)
+    parser.add_argument(
+        "--ollama-parallel-requests",
+        type=int,
+        default=1,
+        help="Concurrent candidate requests. Keep at 1 for serial generation.",
+    )
     parser.add_argument("--ollama-raw", action="store_true", default=True)
     parser.add_argument("--representation", default="raw", choices=SUPPORTED_REPRESENTATIONS)
     return parser.parse_args()
@@ -44,6 +51,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.ollama_parallel_requests <= 0:
+        raise ValueError("--ollama-parallel-requests must be positive")
     random.seed(args.seed)
 
     output_dir = ensure_dir(Path(args.output_dir).resolve())
@@ -66,6 +75,7 @@ def main() -> None:
         timeout_seconds=args.ollama_timeout_seconds,
         keep_alive=args.ollama_keep_alive,
         num_ctx=args.ollama_num_ctx,
+        parallel_requests=args.ollama_parallel_requests,
         raw=args.ollama_raw,
     )
 
@@ -77,6 +87,7 @@ def main() -> None:
     for task_id in range(task_count):
         example = dataset[task_id]
         prompt = build_prompt(example, args.representation)
+        task_started = perf_counter()
         results = client.generate(
             prompt=prompt,
             max_new_tokens=args.max_new_tokens,
@@ -86,6 +97,7 @@ def main() -> None:
             top_p=args.top_p,
             seed=args.seed + (task_id * args.num_return_sequences),
         )
+        task_wall_seconds = perf_counter() - task_started
         decoded = [result.text for result in results]
         generations.append(decoded)
 
@@ -114,6 +126,7 @@ def main() -> None:
                     "input_tokens": result.input_tokens,
                     "output_tokens": result.output_tokens,
                     "generation_seconds": result.generation_seconds,
+                    "task_wall_seconds": task_wall_seconds,
                     "peak_vram_mb": result.peak_vram_mb,
                 }
             )
@@ -138,11 +151,18 @@ def main() -> None:
             }
         )
 
-        last_metric = task_metrics[-1]
+        candidate_seconds = [result.generation_seconds for result in results]
+        input_tokens = results[0].input_tokens
+        output_tokens = [result.output_tokens for result in results if result.output_tokens is not None]
+        peak_vram_values = [result.peak_vram_mb for result in results if result.peak_vram_mb is not None]
+        mean_output_tokens = safe_mean(output_tokens)
+        output_text = f"{mean_output_tokens:.1f}" if mean_output_tokens is not None else "n/a"
         print(
             f"[{task_id + 1}/{task_count}] {example['entry_point']} | "
-            f"in={last_metric['input_tokens']} out~={last_metric['output_tokens']} "
-            f"time={last_metric['generation_seconds']:.2f}s peak_vram={last_metric['peak_vram_mb']}"
+            f"candidates={len(results)} parallel={min(args.ollama_parallel_requests, len(results))} "
+            f"in={input_tokens} out_mean={output_text} "
+            f"task_time={task_wall_seconds:.2f}s request_mean={safe_mean(candidate_seconds):.2f}s "
+            f"peak_vram={max(peak_vram_values) if peak_vram_values else None}"
         )
 
     write_json(output_dir / "generations.json", generations)
@@ -170,6 +190,7 @@ def main() -> None:
             "ollama_timeout_seconds": args.ollama_timeout_seconds,
             "ollama_keep_alive": args.ollama_keep_alive,
             "ollama_num_ctx": args.ollama_num_ctx,
+            "ollama_parallel_requests": args.ollama_parallel_requests,
             "ollama_raw": args.ollama_raw,
             "representation": args.representation,
         },
@@ -182,6 +203,7 @@ def main() -> None:
                 "mean_input_tokens": safe_mean(row["input_tokens"] for row in first_predictions),
                 "mean_output_tokens": safe_mean(row["output_tokens"] for row in first_predictions),
                 "mean_generation_seconds": safe_mean(row["generation_seconds"] for row in first_predictions),
+                "mean_task_wall_seconds": safe_mean(row["task_wall_seconds"] for row in first_predictions),
                 "mean_peak_vram_mb": safe_mean(row["peak_vram_mb"] for row in first_predictions),
             },
             "cross_context_true": {
@@ -194,6 +216,9 @@ def main() -> None:
                 ),
                 "mean_generation_seconds": safe_mean(
                     row["generation_seconds"] for row in first_predictions if row["task_id"] in cross_context_task_ids
+                ),
+                "mean_task_wall_seconds": safe_mean(
+                    row["task_wall_seconds"] for row in first_predictions if row["task_id"] in cross_context_task_ids
                 ),
                 "mean_peak_vram_mb": safe_mean(
                     row["peak_vram_mb"] for row in first_predictions if row["task_id"] in cross_context_task_ids

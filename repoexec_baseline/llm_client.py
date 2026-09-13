@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
@@ -25,13 +26,18 @@ class LLMClient:
         timeout_seconds: float = 600.0,
         keep_alive: str = "30m",
         num_ctx: int | None = None,
+        parallel_requests: int = 1,
         raw: bool = True,
     ) -> None:
+        if parallel_requests <= 0:
+            raise ValueError("parallel_requests must be positive")
+
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.keep_alive = keep_alive
         self.num_ctx = num_ctx
+        self.parallel_requests = parallel_requests
         self.raw = raw
 
     def generate(
@@ -44,20 +50,27 @@ class LLMClient:
         top_p: float = 0.95,
         seed: int | None = None,
     ) -> list[GenerationResult]:
-        results: list[GenerationResult] = []
-        for prediction_id in range(num_return_sequences):
+        if num_return_sequences <= 0:
+            raise ValueError("num_return_sequences must be positive")
+
+        def generate_prediction(prediction_id: int) -> GenerationResult:
             request_seed = None if seed is None else seed + prediction_id
-            results.append(
-                self._generate_once(
-                    prompt=prompt,
-                    max_new_tokens=max_new_tokens,
-                    do_sample=do_sample,
-                    temperature=temperature,
-                    top_p=top_p,
-                    seed=request_seed,
-                )
+            return self._generate_once(
+                prompt=prompt,
+                max_new_tokens=max_new_tokens,
+                do_sample=do_sample,
+                temperature=temperature,
+                top_p=top_p,
+                seed=request_seed,
             )
-        return results
+
+        worker_count = min(self.parallel_requests, num_return_sequences)
+        if worker_count == 1:
+            return [generate_prediction(prediction_id) for prediction_id in range(num_return_sequences)]
+
+        # executor.map preserves prediction order even when requests finish out of order.
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            return list(executor.map(generate_prediction, range(num_return_sequences)))
 
     def _generate_once(
         self,
