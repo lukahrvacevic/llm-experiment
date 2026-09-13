@@ -10,13 +10,13 @@ if [[ ! -d "${FMLE_STORAGE_ROOT}" || ! -w "${FMLE_STORAGE_ROOT}" ]]; then
   FMLE_STORAGE_ROOT="${PROJECT_ROOT}"
 fi
 
-VENV_DIR="${VENV_DIR:-${FMLE_STORAGE_ROOT}/repoexec-venv}"
 RUNS_ROOT="${RUNS_ROOT:-${FMLE_STORAGE_ROOT}/repoexec-runs}"
 TASK_LIMIT="${TASK_LIMIT:-30}"
 NUM_RETURN_SEQUENCES="${NUM_RETURN_SEQUENCES:-5}"
 RUN_PREFIX="${RUN_PREFIX:-fmle-generation30}"
 PULL_MODELS="${PULL_MODELS:-1}"
 INSTALL_OLLAMA="${INSTALL_OLLAMA:-1}"
+REQUIRE_GPU="${REQUIRE_GPU:-1}"
 
 export HF_HOME="${HF_HOME:-${FMLE_STORAGE_ROOT}/hf-cache}"
 export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-${HF_HOME}/datasets}"
@@ -42,14 +42,52 @@ MODELS=(
   "codegemma:7b-code-q4_K_M"
 )
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 is required" >&2
+python_supported() {
+  "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1
+}
+
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [[ -n "${PYTHON_BIN}" ]] && ! python_supported "${PYTHON_BIN}"; then
+  echo "PYTHON_BIN must point to Python 3.10 or newer: ${PYTHON_BIN}" >&2
   exit 1
 fi
+
+if [[ -z "${PYTHON_BIN}" ]]; then
+  for candidate in python3.12 python3.11 python3.10 /opt/conda/bin/python python3; do
+    candidate_path="$(command -v "${candidate}" 2>/dev/null || true)"
+    if [[ -n "${candidate_path}" ]] && python_supported "${candidate_path}"; then
+      PYTHON_BIN="${candidate_path}"
+      break
+    fi
+  done
+fi
+
+if [[ -z "${PYTHON_BIN}" ]]; then
+  echo "Python 3.10 or newer is required. Load a Python/Conda module or set PYTHON_BIN explicitly." >&2
+  python3 --version 2>/dev/null || true
+  exit 1
+fi
+
+PYTHON_VERSION="$("${PYTHON_BIN}" --version 2>&1)"
+echo "Using Python: ${PYTHON_BIN} (${PYTHON_VERSION})"
+
+if [[ "${REQUIRE_GPU}" == "1" ]]; then
+  GPU_LIST="$(nvidia-smi -L 2>/dev/null || true)"
+  if [[ -z "${GPU_LIST}" ]]; then
+    echo "No allocated NVIDIA GPU is visible. Run this inside the FMLe GPU/Jupyter instance, not on login01." >&2
+    exit 1
+  fi
+fi
+
+VENV_DIR="${VENV_DIR:-${FMLE_STORAGE_ROOT}/repoexec-venv-py310}"
 mkdir -p "${HF_DATASETS_CACHE}" "${OLLAMA_MODELS}" "${RUNS_ROOT}"
 
 if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
-  python3 -m venv "${VENV_DIR}"
+  "${PYTHON_BIN}" -m venv "${VENV_DIR}"
+elif ! python_supported "${VENV_DIR}/bin/python"; then
+  echo "Existing venv uses Python older than 3.10: ${VENV_DIR}" >&2
+  echo "Set VENV_DIR to a new path and run again." >&2
+  exit 1
 fi
 "${VENV_DIR}/bin/python" -m pip install --upgrade pip
 "${VENV_DIR}/bin/python" -m pip install -r "${PROJECT_ROOT}/requirements-baseline.txt"

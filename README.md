@@ -107,6 +107,10 @@ Glavni izlazi su:
 
 `run_fmle_generation.sh` je Linux/SSH launcher za generisanje bez Docker evaluacije. Podrazumevano instalira Ollamu bez `sudo` pristupa u `/workspace/ollama-runtime` i pokrece svih osam modela nad prvih 30 `full_context` taskova, za `raw`, `ast` i `reduced_ast`, sa pet kandidata po tasku.
 
+Za dedicated FMLe Jupyter GPU cvor isti tok je dostupan u `fmle_generation.ipynb`. Notebook proverava Python i GPU pre instalacije, koristi user-writable Ollama instalaciju, meri aktivno vreme svake faze i na kraju daje link ka prenosivom generation bundle-u.
+
+Launcher zahteva Python 3.10 ili noviji i vidljiv NVIDIA GPU. Automatski proverava `python3.12`, `python3.11`, `python3.10` i `/opt/conda/bin/python`; alternativno se putanja zadaje kroz `PYTHON_BIN`. Namerno odbija pokretanje na `login01` bez dodeljenog GPU-a.
+
 ```bash
 chmod +x run_fmle_generation.sh
 nohup ./run_fmle_generation.sh > /workspace/repoexec-generation.log 2>&1 &
