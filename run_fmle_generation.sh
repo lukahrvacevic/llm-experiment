@@ -14,6 +14,7 @@ RUNS_ROOT="${RUNS_ROOT:-${FMLE_STORAGE_ROOT}/repoexec-runs}"
 TASK_LIMIT="${TASK_LIMIT:-30}"
 NUM_RETURN_SEQUENCES="${NUM_RETURN_SEQUENCES:-5}"
 OLLAMA_PARALLEL_REQUESTS="${OLLAMA_PARALLEL_REQUESTS:-5}"
+PARALLEL_TASKS="${PARALLEL_TASKS:-2}"
 OLLAMA_NUM_CTX="${OLLAMA_NUM_CTX:-4096}"
 RUN_PREFIX="${RUN_PREFIX:-fmle-generation30}"
 PULL_MODELS="${PULL_MODELS:-1}"
@@ -33,7 +34,8 @@ export OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://${OLLAMA_HOST}}"
 export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
 export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
-export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-${OLLAMA_PARALLEL_REQUESTS}}"
+DEFAULT_OLLAMA_NUM_PARALLEL="$((OLLAMA_PARALLEL_REQUESTS * PARALLEL_TASKS))"
+export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-${DEFAULT_OLLAMA_NUM_PARALLEL}}"
 export OLLAMA_CONTEXT_LENGTH="${OLLAMA_CONTEXT_LENGTH:-${OLLAMA_NUM_CTX}}"
 
 LOCAL_NO_PROXY="127.0.0.1,localhost"
@@ -156,7 +158,7 @@ if ! ollama list >/dev/null 2>&1; then
 fi
 
 nvidia-smi
-echo "Generation concurrency: client=${OLLAMA_PARALLEL_REQUESTS}, server=${OLLAMA_NUM_PARALLEL}, num_ctx=${OLLAMA_NUM_CTX}"
+echo "Generation concurrency: tasks=${PARALLEL_TASKS}, candidates=${OLLAMA_PARALLEL_REQUESTS}, server=${OLLAMA_NUM_PARALLEL}, num_ctx=${OLLAMA_NUM_CTX}"
 
 if [[ "${PULL_MODELS}" == "1" ]]; then
   for model in "${MODELS[@]}"; do
@@ -187,6 +189,7 @@ cd "${PROJECT_ROOT}"
   --ollama-keep-alive "${OLLAMA_KEEP_ALIVE}" \
   --ollama-num-ctx "${OLLAMA_NUM_CTX}" \
   --ollama-parallel-requests "${OLLAMA_PARALLEL_REQUESTS}" \
+  --parallel-tasks "${PARALLEL_TASKS}" \
   --session-start-epoch "${SESSION_START_EPOCH}"
 
 echo "Generation is complete. Stop the FMLe instance after downloading the bundle."

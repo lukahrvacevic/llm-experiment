@@ -44,6 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ollama-keep-alive", default="30m")
     parser.add_argument("--ollama-num-ctx", type=int, default=None)
     parser.add_argument("--ollama-parallel-requests", type=int, default=1)
+    parser.add_argument("--parallel-tasks", type=int, default=1)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--no-archive", action="store_true")
     parser.add_argument(
@@ -142,6 +143,8 @@ def build_generate_command(args: argparse.Namespace, model: str, representation:
         args.ollama_keep_alive,
         "--ollama-parallel-requests",
         str(args.ollama_parallel_requests),
+        "--parallel-tasks",
+        str(args.parallel_tasks),
     ]
     if args.do_sample:
         command.append("--do-sample")
@@ -197,6 +200,7 @@ def write_matrix_summary(
                 "ollama_base_url": args.ollama_base_url,
                 "ollama_num_ctx": args.ollama_num_ctx,
                 "ollama_parallel_requests": args.ollama_parallel_requests,
+                "parallel_tasks": args.parallel_tasks,
             },
             "runs": rows,
         },
@@ -234,6 +238,8 @@ def main() -> None:
         raise ValueError("--num-return-sequences must be positive")
     if args.ollama_parallel_requests <= 0:
         raise ValueError("--ollama-parallel-requests must be positive")
+    if args.parallel_tasks <= 0:
+        raise ValueError("--parallel-tasks must be positive")
 
     workspace_root = Path.cwd().resolve()
     runs_root = ensure_dir(Path(args.runs_root).resolve())
@@ -261,6 +267,7 @@ def main() -> None:
                     "task_limit": args.task_limit,
                     "num_return_sequences": args.num_return_sequences,
                     "ollama_parallel_requests": args.ollama_parallel_requests,
+                    "parallel_tasks": args.parallel_tasks,
                     "run_dir": run_name,
                     "status": "pending",
                     "generation_wall_seconds": None,
@@ -326,6 +333,7 @@ def main() -> None:
                         "task_limit": args.task_limit,
                         "num_return_sequences": args.num_return_sequences,
                         "ollama_parallel_requests": args.ollama_parallel_requests,
+                        "parallel_tasks": args.parallel_tasks,
                         "started_at_utc": row["started_at_utc"],
                         "finished_at_utc": row["finished_at_utc"],
                         "generation_wall_seconds": elapsed,

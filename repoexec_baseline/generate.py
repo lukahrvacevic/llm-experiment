@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import os
 import random
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from time import perf_counter
+from typing import Any, Callable, Iterable, Iterator, TypeVar
 
 from repoexec_baseline.common import (
     DEFAULT_DATASET,
@@ -17,8 +19,26 @@ from repoexec_baseline.common import (
     write_json,
     write_jsonl,
 )
-from repoexec_baseline.llm_client import LLMClient
+from repoexec_baseline.llm_client import GenerationResult, LLMClient
 from repoexec_baseline.representations import SUPPORTED_REPRESENTATIONS, build_prompt
+
+
+InputT = TypeVar("InputT")
+OutputT = TypeVar("OutputT")
+
+
+def ordered_parallel_map(
+    function: Callable[[InputT], OutputT],
+    values: Iterable[InputT],
+    max_workers: int,
+) -> Iterator[OutputT]:
+    if max_workers <= 0:
+        raise ValueError("max_workers must be positive")
+    if max_workers == 1:
+        yield from map(function, values)
+        return
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        yield from executor.map(function, values)
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,6 +64,12 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Concurrent candidate requests. Keep at 1 for serial generation.",
     )
+    parser.add_argument(
+        "--parallel-tasks",
+        type=int,
+        default=1,
+        help="Tasks generated concurrently. Total possible requests are this value times --ollama-parallel-requests.",
+    )
     parser.add_argument("--ollama-raw", action="store_true", default=True)
     parser.add_argument("--representation", default="raw", choices=SUPPORTED_REPRESENTATIONS)
     return parser.parse_args()
@@ -51,8 +77,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.num_return_sequences <= 0:
+        raise ValueError("--num-return-sequences must be positive")
+    if args.task_limit is not None and args.task_limit <= 0:
+        raise ValueError("--task-limit must be positive")
     if args.ollama_parallel_requests <= 0:
         raise ValueError("--ollama-parallel-requests must be positive")
+    if args.parallel_tasks <= 0:
+        raise ValueError("--parallel-tasks must be positive")
     random.seed(args.seed)
 
     output_dir = ensure_dir(Path(args.output_dir).resolve())
@@ -84,9 +116,15 @@ def main() -> None:
     processed_generations: list[dict[str, object]] = []
     task_index: list[dict[str, object]] = []
 
+    task_inputs: list[tuple[int, dict[str, Any], str]] = []
     for task_id in range(task_count):
         example = dataset[task_id]
-        prompt = build_prompt(example, args.representation)
+        task_inputs.append((task_id, example, build_prompt(example, args.representation)))
+
+    def generate_task(
+        task_input: tuple[int, dict[str, Any], str],
+    ) -> tuple[int, dict[str, Any], list[GenerationResult], float]:
+        task_id, example, prompt = task_input
         task_started = perf_counter()
         results = client.generate(
             prompt=prompt,
@@ -98,6 +136,10 @@ def main() -> None:
             seed=args.seed + (task_id * args.num_return_sequences),
         )
         task_wall_seconds = perf_counter() - task_started
+        return task_id, example, results, task_wall_seconds
+
+    generated_tasks = ordered_parallel_map(generate_task, task_inputs, args.parallel_tasks)
+    for task_id, example, results, task_wall_seconds in generated_tasks:
         decoded = [result.text for result in results]
         generations.append(decoded)
 
@@ -159,7 +201,8 @@ def main() -> None:
         output_text = f"{mean_output_tokens:.1f}" if mean_output_tokens is not None else "n/a"
         print(
             f"[{task_id + 1}/{task_count}] {example['entry_point']} | "
-            f"candidates={len(results)} parallel={min(args.ollama_parallel_requests, len(results))} "
+            f"candidates={len(results)} task_parallel={args.parallel_tasks} "
+            f"candidate_parallel={min(args.ollama_parallel_requests, len(results))} "
             f"in={input_tokens} out_mean={output_text} "
             f"task_time={task_wall_seconds:.2f}s request_mean={safe_mean(candidate_seconds):.2f}s "
             f"peak_vram={max(peak_vram_values) if peak_vram_values else None}"
@@ -191,6 +234,7 @@ def main() -> None:
             "ollama_keep_alive": args.ollama_keep_alive,
             "ollama_num_ctx": args.ollama_num_ctx,
             "ollama_parallel_requests": args.ollama_parallel_requests,
+            "parallel_tasks": args.parallel_tasks,
             "ollama_raw": args.ollama_raw,
             "representation": args.representation,
         },

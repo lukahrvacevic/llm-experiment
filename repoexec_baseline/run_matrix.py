@@ -52,6 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ollama-keep-alive", default="30m")
     parser.add_argument("--ollama-num-ctx", type=int, default=None)
     parser.add_argument("--ollama-parallel-requests", type=int, default=1)
+    parser.add_argument("--parallel-tasks", type=int, default=1)
     parser.add_argument("--execution-timeout", type=float, default=120.0)
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
@@ -126,6 +127,8 @@ def main() -> None:
                 args.ollama_keep_alive,
                 "--ollama-parallel-requests",
                 str(args.ollama_parallel_requests),
+                "--parallel-tasks",
+                str(args.parallel_tasks),
             ]
             if args.do_sample:
                 generate_cmd.append("--do-sample")
@@ -178,6 +181,7 @@ def main() -> None:
                 "representation": args.representation,
                 "task_limit": args.task_limit,
                 "ollama_parallel_requests": args.ollama_parallel_requests,
+                "parallel_tasks": args.parallel_tasks,
                 "ollama_num_ctx": args.ollama_num_ctx,
                 "generate_seconds": generate_seconds,
                 "execute_seconds": execute_seconds,

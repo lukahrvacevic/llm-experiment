@@ -5,6 +5,7 @@ import time
 import unittest
 from unittest.mock import patch
 
+from repoexec_baseline.generate import ordered_parallel_map
 from repoexec_baseline.llm_client import GenerationResult, LLMClient
 
 
@@ -46,6 +47,27 @@ class LLMClientConcurrencyTest(unittest.TestCase):
         seeds, max_active = self.run_generation(parallel_requests=3)
         self.assertEqual(seeds, [1, 2, 3])
         self.assertEqual(max_active, 3)
+
+
+class TaskConcurrencyTest(unittest.TestCase):
+    def test_parallel_tasks_preserve_input_order(self) -> None:
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def process(value: int) -> int:
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.03 * (4 - value))
+            with lock:
+                active -= 1
+            return value
+
+        results = list(ordered_parallel_map(process, [1, 2, 3], max_workers=2))
+        self.assertEqual(results, [1, 2, 3])
+        self.assertEqual(max_active, 2)
 
 
 if __name__ == "__main__":
