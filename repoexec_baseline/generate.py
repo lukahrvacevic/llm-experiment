@@ -126,15 +126,20 @@ def main() -> None:
     ) -> tuple[int, dict[str, Any], list[GenerationResult], float]:
         task_id, example, prompt = task_input
         task_started = perf_counter()
-        results = client.generate(
-            prompt=prompt,
-            max_new_tokens=args.max_new_tokens,
-            num_return_sequences=args.num_return_sequences,
-            do_sample=args.do_sample,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            seed=args.seed + (task_id * args.num_return_sequences),
-        )
+        try:
+            results = client.generate(
+                prompt=prompt,
+                max_new_tokens=args.max_new_tokens,
+                num_return_sequences=args.num_return_sequences,
+                do_sample=args.do_sample,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                seed=args.seed + (task_id * args.num_return_sequences),
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Generation failed for task_id={task_id}, entry_point={example['entry_point']}"
+            ) from exc
         task_wall_seconds = perf_counter() - task_started
         return task_id, example, results, task_wall_seconds
 
