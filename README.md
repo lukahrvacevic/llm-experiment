@@ -143,3 +143,9 @@ Nakon prenosa i raspakivanja bundle-a u lokalni `runs` direktorijum, svi run-ovi
   --matrix-summary runs\fmle-generation30-generation-summary.json `
   --repoexec-dir RepoExec
 ```
+
+## FMLe BF16 serial run
+
+`fmle_generation_bf16_serial.ipynb` je drugi remote eksperiment za A100 40 GB. Koristi vLLM i originalne BF16 checkpointove `DeepSeek-Coder-V2-Lite-Base`, `StarCoder2-15B`, `Qwen2.5-Coder-14B` i `StarCoder` 15.5B. Modeli, taskovi i pet kandidata izvrsavaju se potpuno serijski (`max_num_seqs=1`, jedan HTTP zahtev), dok nezavisan `nvidia-smi` proces samo belezi GPU telemetriju.
+
+Notebook zadrzava prvih 30 `full_context` taskova, sve tri reprezentacije i iste sampling parametre kao prvi remote run. `bigcode/starcoder` zahteva prihvacenu Hugging Face licencu i `HF_TOKEN`. Generacije se cuvaju u `repoexec-runs-bf16`, a zavrsni bundle ostaje kompatibilan sa `repoexec_baseline.evaluate_generation_matrix`.

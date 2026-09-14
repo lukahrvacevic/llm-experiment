@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
         description="Generate a RepoExec model/representation matrix without executing generated code."
     )
     parser.add_argument("--models", nargs="+", default=DEFAULT_MODELS)
+    parser.add_argument("--backend", choices=["ollama", "vllm"], default="ollama")
     parser.add_argument(
         "--representations",
         nargs="+",
@@ -43,7 +44,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ollama-timeout-seconds", type=float, default=600.0)
     parser.add_argument("--ollama-keep-alive", default="30m")
     parser.add_argument("--ollama-num-ctx", type=int, default=None)
-    parser.add_argument("--ollama-parallel-requests", type=int, default=1)
+    parser.add_argument(
+        "--ollama-parallel-requests",
+        "--parallel-requests",
+        dest="ollama_parallel_requests",
+        type=int,
+        default=1,
+    )
+    parser.add_argument("--vllm-base-url", default="http://127.0.0.1:8000/v1")
+    parser.add_argument("--vllm-timeout-seconds", type=float, default=1800.0)
     parser.add_argument("--parallel-tasks", type=int, default=1)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--no-archive", action="store_true")
@@ -117,6 +126,8 @@ def build_generate_command(args: argparse.Namespace, model: str, representation:
         "repoexec_baseline.generate",
         "--model",
         model,
+        "--backend",
+        args.backend,
         "--output-dir",
         str(output_dir),
         "--subset",
@@ -146,6 +157,15 @@ def build_generate_command(args: argparse.Namespace, model: str, representation:
         "--parallel-tasks",
         str(args.parallel_tasks),
     ]
+    if args.backend == "vllm":
+        command.extend(
+            [
+                "--vllm-base-url",
+                args.vllm_base_url,
+                "--vllm-timeout-seconds",
+                str(args.vllm_timeout_seconds),
+            ]
+        )
     if args.do_sample:
         command.append("--do-sample")
     if args.ollama_num_ctx is not None:
@@ -188,6 +208,7 @@ def write_matrix_summary(
             "current_invocation_generation_wall_seconds": current_invocation_generation_seconds,
             "configuration": {
                 "models": args.models,
+                "backend": args.backend,
                 "representations": args.representations,
                 "subset": args.subset,
                 "task_limit": args.task_limit,
@@ -200,7 +221,9 @@ def write_matrix_summary(
                 "ollama_base_url": args.ollama_base_url,
                 "ollama_num_ctx": args.ollama_num_ctx,
                 "ollama_parallel_requests": args.ollama_parallel_requests,
+                "parallel_requests": args.ollama_parallel_requests,
                 "parallel_tasks": args.parallel_tasks,
+                "vllm_base_url": args.vllm_base_url if args.backend == "vllm" else None,
             },
             "runs": rows,
         },
@@ -240,6 +263,8 @@ def main() -> None:
         raise ValueError("--ollama-parallel-requests must be positive")
     if args.parallel_tasks <= 0:
         raise ValueError("--parallel-tasks must be positive")
+    if args.backend == "vllm" and (args.ollama_parallel_requests != 1 or args.parallel_tasks != 1):
+        raise ValueError("The vLLM experiment requires --parallel-requests 1 and --parallel-tasks 1")
 
     workspace_root = Path.cwd().resolve()
     runs_root = ensure_dir(Path(args.runs_root).resolve())
@@ -262,11 +287,13 @@ def main() -> None:
                 output_dir = ensure_dir(runs_root / run_name)
                 row: dict[str, Any] = {
                     "model": model,
+                    "backend": args.backend,
                     "subset": args.subset,
                     "representation": representation,
                     "task_limit": args.task_limit,
                     "num_return_sequences": args.num_return_sequences,
                     "ollama_parallel_requests": args.ollama_parallel_requests,
+                    "parallel_requests": args.ollama_parallel_requests,
                     "parallel_tasks": args.parallel_tasks,
                     "run_dir": run_name,
                     "status": "pending",
@@ -338,6 +365,7 @@ def main() -> None:
                         "task_limit": args.task_limit,
                         "num_return_sequences": args.num_return_sequences,
                         "ollama_parallel_requests": args.ollama_parallel_requests,
+                        "parallel_requests": args.ollama_parallel_requests,
                         "parallel_tasks": args.parallel_tasks,
                         "started_at_utc": row["started_at_utc"],
                         "finished_at_utc": row["finished_at_utc"],

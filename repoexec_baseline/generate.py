@@ -21,6 +21,7 @@ from repoexec_baseline.common import (
 )
 from repoexec_baseline.llm_client import GenerationResult, LLMClient
 from repoexec_baseline.representations import SUPPORTED_REPRESENTATIONS, build_prompt
+from repoexec_baseline.vllm_client import VLLMClient
 
 
 InputT = TypeVar("InputT")
@@ -55,9 +56,10 @@ def token_rate(token_count: int | None, duration_seconds: float | None) -> float
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate a raw/full_context RepoExec baseline via Ollama.")
-    parser.add_argument("--model", required=True, help="Ollama model name.")
+    parser = argparse.ArgumentParser(description="Generate a RepoExec baseline through Ollama or vLLM.")
+    parser.add_argument("--model", required=True, help="Model name exposed by the selected backend.")
     parser.add_argument("--output-dir", required=True, help="Directory for generations and metrics.")
+    parser.add_argument("--backend", choices=["ollama", "vllm"], default="ollama")
     parser.add_argument("--dataset", default=DEFAULT_DATASET)
     parser.add_argument("--subset", default=DEFAULT_SUBSET, choices=["full_context", "medium_context", "small_context"])
     parser.add_argument("--max-new-tokens", type=int, default=256)
@@ -73,6 +75,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ollama-num-ctx", type=int, default=None)
     parser.add_argument(
         "--ollama-parallel-requests",
+        "--parallel-requests",
+        dest="ollama_parallel_requests",
         type=int,
         default=1,
         help="Concurrent candidate requests. Keep at 1 for serial generation.",
@@ -84,6 +88,8 @@ def parse_args() -> argparse.Namespace:
         help="Tasks generated concurrently. Total possible requests are this value times --ollama-parallel-requests.",
     )
     parser.add_argument("--ollama-raw", action="store_true", default=True)
+    parser.add_argument("--vllm-base-url", default="http://127.0.0.1:8000/v1")
+    parser.add_argument("--vllm-timeout-seconds", type=float, default=1800.0)
     parser.add_argument("--representation", default="raw", choices=SUPPORTED_REPRESENTATIONS)
     return parser.parse_args()
 
@@ -98,6 +104,8 @@ def main() -> None:
         raise ValueError("--ollama-parallel-requests must be positive")
     if args.parallel_tasks <= 0:
         raise ValueError("--parallel-tasks must be positive")
+    if args.backend == "vllm" and (args.ollama_parallel_requests != 1 or args.parallel_tasks != 1):
+        raise ValueError("The vLLM experiment requires --parallel-requests 1 and --parallel-tasks 1")
     random.seed(args.seed)
 
     output_dir = ensure_dir(Path(args.output_dir).resolve())
@@ -114,15 +122,23 @@ def main() -> None:
 
     dataset = load_repoexec_dataset(args.dataset, args.subset, hf_home)
     task_count = len(dataset) if args.task_limit is None else min(args.task_limit, len(dataset))
-    client = LLMClient(
-        model=args.model,
-        base_url=args.ollama_base_url,
-        timeout_seconds=args.ollama_timeout_seconds,
-        keep_alive=args.ollama_keep_alive,
-        num_ctx=args.ollama_num_ctx,
-        parallel_requests=args.ollama_parallel_requests,
-        raw=args.ollama_raw,
-    )
+    if args.backend == "vllm":
+        client = VLLMClient(
+            model=args.model,
+            base_url=args.vllm_base_url,
+            timeout_seconds=args.vllm_timeout_seconds,
+            parallel_requests=args.ollama_parallel_requests,
+        )
+    else:
+        client = LLMClient(
+            model=args.model,
+            base_url=args.ollama_base_url,
+            timeout_seconds=args.ollama_timeout_seconds,
+            keep_alive=args.ollama_keep_alive,
+            num_ctx=args.ollama_num_ctx,
+            parallel_requests=args.ollama_parallel_requests,
+            raw=args.ollama_raw,
+        )
 
     generations: list[list[str]] = []
     task_metrics: list[dict[str, object]] = []
@@ -260,6 +276,7 @@ def main() -> None:
         output_dir / "run_config.json",
         {
             "model": args.model,
+            "backend": args.backend,
             "dataset": args.dataset,
             "subset": args.subset,
             "task_count": task_count,
@@ -274,8 +291,10 @@ def main() -> None:
             "ollama_keep_alive": args.ollama_keep_alive,
             "ollama_num_ctx": args.ollama_num_ctx,
             "ollama_parallel_requests": args.ollama_parallel_requests,
+            "parallel_requests": args.ollama_parallel_requests,
             "parallel_tasks": args.parallel_tasks,
             "ollama_raw": args.ollama_raw,
+            "vllm_base_url": args.vllm_base_url if args.backend == "vllm" else None,
             "representation": args.representation,
         },
     )
