@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Any
+from typing import Any, Callable
 
 import requests
 
@@ -49,6 +49,7 @@ class LLMClient:
         temperature: float = 0.2,
         top_p: float = 0.95,
         seed: int | None = None,
+        on_prediction_complete: Callable[[int, GenerationResult], None] | None = None,
     ) -> list[GenerationResult]:
         if num_return_sequences <= 0:
             raise ValueError("num_return_sequences must be positive")
@@ -66,11 +67,27 @@ class LLMClient:
 
         worker_count = min(self.parallel_requests, num_return_sequences)
         if worker_count == 1:
-            return [generate_prediction(prediction_id) for prediction_id in range(num_return_sequences)]
+            results: list[GenerationResult] = []
+            for prediction_id in range(num_return_sequences):
+                result = generate_prediction(prediction_id)
+                results.append(result)
+                if on_prediction_complete is not None:
+                    on_prediction_complete(prediction_id, result)
+            return results
 
-        # executor.map preserves prediction order even when requests finish out of order.
+        ordered_results: list[GenerationResult | None] = [None] * num_return_sequences
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            return list(executor.map(generate_prediction, range(num_return_sequences)))
+            futures = {
+                executor.submit(generate_prediction, prediction_id): prediction_id
+                for prediction_id in range(num_return_sequences)
+            }
+            for future in as_completed(futures):
+                prediction_id = futures[future]
+                result = future.result()
+                ordered_results[prediction_id] = result
+                if on_prediction_complete is not None:
+                    on_prediction_complete(prediction_id, result)
+        return [result for result in ordered_results if result is not None]
 
     def _generate_once(
         self,

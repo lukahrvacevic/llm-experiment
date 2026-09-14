@@ -48,6 +48,25 @@ class LLMClientConcurrencyTest(unittest.TestCase):
         self.assertEqual(seeds, [1, 2, 3])
         self.assertEqual(max_active, 3)
 
+    def test_completion_callback_reports_every_prediction(self) -> None:
+        client = LLMClient(model="test-model", parallel_requests=2)
+        completed: list[int] = []
+
+        def generate_once(**kwargs: object) -> GenerationResult:
+            seed = int(kwargs["seed"])
+            return GenerationResult(str(seed), 1, 1, 0.01, None, {})
+
+        with patch.object(client, "_generate_once", side_effect=generate_once):
+            results = client.generate(
+                prompt="prompt",
+                max_new_tokens=1,
+                num_return_sequences=3,
+                seed=10,
+                on_prediction_complete=lambda prediction_id, _: completed.append(prediction_id),
+            )
+        self.assertEqual([result.text for result in results], ["10", "11", "12"])
+        self.assertEqual(sorted(completed), [0, 1, 2])
+
 
 class TaskConcurrencyTest(unittest.TestCase):
     def test_parallel_tasks_preserve_input_order(self) -> None:

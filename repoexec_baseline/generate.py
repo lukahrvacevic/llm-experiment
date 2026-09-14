@@ -41,6 +41,19 @@ def ordered_parallel_map(
         yield from executor.map(function, values)
 
 
+def ollama_duration_seconds(result: GenerationResult, field: str) -> float | None:
+    duration_ns = result.raw_response.get(field)
+    if not isinstance(duration_ns, (int, float)) or duration_ns <= 0:
+        return None
+    return float(duration_ns) / 1_000_000_000
+
+
+def token_rate(token_count: int | None, duration_seconds: float | None) -> float | None:
+    if token_count is None or duration_seconds is None or duration_seconds <= 0:
+        return None
+    return token_count / duration_seconds
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate a raw/full_context RepoExec baseline via Ollama.")
     parser.add_argument("--model", required=True, help="Ollama model name.")
@@ -126,6 +139,21 @@ def main() -> None:
     ) -> tuple[int, dict[str, Any], list[GenerationResult], float]:
         task_id, example, prompt = task_input
         task_started = perf_counter()
+
+        def report_candidate(prediction_id: int, result: GenerationResult) -> None:
+            prompt_seconds = ollama_duration_seconds(result, "prompt_eval_duration")
+            eval_seconds = ollama_duration_seconds(result, "eval_duration")
+            prompt_tps = token_rate(result.input_tokens, prompt_seconds)
+            decode_tps = token_rate(result.output_tokens, eval_seconds)
+            prompt_text = f"{prompt_tps:.2f}" if prompt_tps is not None else "n/a"
+            decode_text = f"{decode_tps:.2f}" if decode_tps is not None else "n/a"
+            print(
+                f"[{task_id + 1}/{task_count} candidate {prediction_id + 1}/{args.num_return_sequences}] "
+                f"{example['entry_point']} | time={result.generation_seconds:.2f}s "
+                f"prompt_tps={prompt_text} decode_tps={decode_text} out={result.output_tokens}",
+                flush=True,
+            )
+
         try:
             results = client.generate(
                 prompt=prompt,
@@ -135,6 +163,7 @@ def main() -> None:
                 temperature=args.temperature,
                 top_p=args.top_p,
                 seed=args.seed + (task_id * args.num_return_sequences),
+                on_prediction_complete=report_candidate,
             )
         except Exception as exc:
             raise RuntimeError(
@@ -153,6 +182,8 @@ def main() -> None:
         patched_tests: list[str] = []
 
         for prediction_id, result in enumerate(results):
+            prompt_eval_seconds = ollama_duration_seconds(result, "prompt_eval_duration")
+            eval_seconds = ollama_duration_seconds(result, "eval_duration")
             extracted_prediction = extract_solution_function(
                 generation_text=result.text,
                 target_function_prompt=example["target_function_prompt"],
@@ -173,6 +204,10 @@ def main() -> None:
                     "input_tokens": result.input_tokens,
                     "output_tokens": result.output_tokens,
                     "generation_seconds": result.generation_seconds,
+                    "prompt_eval_seconds": prompt_eval_seconds,
+                    "eval_seconds": eval_seconds,
+                    "prompt_tokens_per_second": token_rate(result.input_tokens, prompt_eval_seconds),
+                    "output_tokens_per_second": token_rate(result.output_tokens, eval_seconds),
                     "task_wall_seconds": task_wall_seconds,
                     "peak_vram_mb": result.peak_vram_mb,
                 }
