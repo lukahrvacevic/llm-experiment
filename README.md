@@ -110,7 +110,7 @@ Glavni izlazi su:
 
 `run_fmle_generation.sh` je Linux/SSH launcher za generisanje bez Docker evaluacije. Podrazumevano instalira Ollamu bez `sudo` pristupa u `/workspace/ollama-runtime` i pokrece svih osam modela nad prvih 30 `full_context` taskova, za `raw`, `ast` i `reduced_ast`, sa pet kandidata po tasku.
 
-FMLe launcher i notebook za kompletan skup modela bezbedno koriste jedan task sa pet paralelnih kandidata i `num_ctx=4096`. `PARALLEL_TASKS=2` i `OLLAMA_NUM_PARALLEL=10` ostaju opcija za odvojene run-ove sa modelima do 7B; 16B model je sa deset zahteva premasio timeout. Launcher i notebook podrazumevano restartuju Ollama server kako bi novo podesavanje bilo primenjeno; to se moze iskljuciti sa `RESTART_OLLAMA=0`. Za potpuno serijski rezim postavi `PARALLEL_TASKS=1 OLLAMA_PARALLEL_REQUESTS=1 OLLAMA_NUM_PARALLEL=1`. Promena `OLLAMA_NUM_PARALLEL` zahteva restart Ollama servera.
+FMLe launcher i notebook rade u dve faze. Modeli do 7B koriste pet paralelnih kandidata, zatim se Ollama restartuje sa jednim slotom i `deepseek-coder-v2:16b-lite-base-q4_K_M` generise pet kandidata redom. Obe faze koriste `num_ctx=4096`, isti seed i isti run direktorijum; zavrsni summary i bundle sadrze sve modele. `PARALLEL_TASKS=2` i deset server slotova ostaju opcija samo za prvu fazu. Za potpuno serijski rezim postavi `PARALLEL_TASKS=1 OLLAMA_PARALLEL_REQUESTS=1 OLLAMA_NUM_PARALLEL=1`.
 
 Za dedicated FMLe Jupyter GPU cvor isti tok je dostupan u `fmle_generation.ipynb`. Notebook proverava Python i GPU, pravi izolovan RepoExec venv bez menjanja CUDA/RAPIDS kernel paketa, koristi user-writable Ollama instalaciju, meri aktivno vreme svake faze i na kraju daje link ka prenosivom generation bundle-u.
 

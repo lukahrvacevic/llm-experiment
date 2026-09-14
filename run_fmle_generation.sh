@@ -14,6 +14,7 @@ RUNS_ROOT="${RUNS_ROOT:-${FMLE_STORAGE_ROOT}/repoexec-runs}"
 TASK_LIMIT="${TASK_LIMIT:-30}"
 NUM_RETURN_SEQUENCES="${NUM_RETURN_SEQUENCES:-5}"
 OLLAMA_PARALLEL_REQUESTS="${OLLAMA_PARALLEL_REQUESTS:-5}"
+SERIAL_OLLAMA_REQUESTS="${SERIAL_OLLAMA_REQUESTS:-1}"
 PARALLEL_TASKS="${PARALLEL_TASKS:-1}"
 OLLAMA_NUM_CTX="${OLLAMA_NUM_CTX:-4096}"
 RUN_PREFIX="${RUN_PREFIX:-fmle-generation30}"
@@ -49,6 +50,16 @@ MODELS=(
   "deepseek-coder:1.3b-base-q4_K_M"
   "deepseek-coder:6.7b-base-q4_K_M"
   "deepseek-coder-v2:16b-lite-base-q4_K_M"
+  "codegemma:2b-code-q4_K_M"
+  "codegemma:7b-code-q4_K_M"
+)
+
+PARALLEL_MODELS=(
+  "qwen2.5-coder:1.5b-base"
+  "qwen2.5-coder:3b-base"
+  "qwen2.5-coder:7b-base"
+  "deepseek-coder:1.3b-base-q4_K_M"
+  "deepseek-coder:6.7b-base-q4_K_M"
   "codegemma:2b-code-q4_K_M"
   "codegemma:7b-code-q4_K_M"
 )
@@ -172,8 +183,9 @@ if [[ "${PULL_MODELS}" == "1" ]]; then
 fi
 
 cd "${PROJECT_ROOT}"
+echo "Parallel phase: models up to 7B"
 "${VENV_DIR}/bin/python" -m repoexec_baseline.run_generation_matrix \
-  --models "${MODELS[@]}" \
+  --models "${PARALLEL_MODELS[@]}" \
   --representations raw ast reduced_ast \
   --subset full_context \
   --task-limit "${TASK_LIMIT}" \
@@ -190,6 +202,54 @@ cd "${PROJECT_ROOT}"
   --ollama-num-ctx "${OLLAMA_NUM_CTX}" \
   --ollama-parallel-requests "${OLLAMA_PARALLEL_REQUESTS}" \
   --parallel-tasks "${PARALLEL_TASKS}" \
+  --no-archive \
+  --session-start-epoch "${SESSION_START_EPOCH}"
+
+echo "Restarting Ollama for serial deepseek-coder-v2:16b generation"
+pkill -x ollama >/dev/null 2>&1 || true
+for _ in $(seq 1 30); do
+  if ! ollama list >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+if ollama list >/dev/null 2>&1; then
+  echo "Could not stop Ollama before the serial phase" >&2
+  exit 1
+fi
+
+export OLLAMA_NUM_PARALLEL="${SERIAL_OLLAMA_REQUESTS}"
+ollama serve >> "${RUNS_ROOT}/${RUN_PREFIX}-ollama.log" 2>&1 &
+OLLAMA_PID="$!"
+for _ in $(seq 1 60); do
+  if ollama list >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+if ! ollama list >/dev/null 2>&1; then
+  echo "Ollama did not become ready for the serial phase" >&2
+  exit 1
+fi
+
+"${VENV_DIR}/bin/python" -m repoexec_baseline.run_generation_matrix \
+  --models "${MODELS[@]}" \
+  --representations raw ast reduced_ast \
+  --subset full_context \
+  --task-limit "${TASK_LIMIT}" \
+  --runs-root "${RUNS_ROOT}" \
+  --run-prefix "${RUN_PREFIX}" \
+  --num-return-sequences "${NUM_RETURN_SEQUENCES}" \
+  --max-new-tokens 256 \
+  --do-sample \
+  --temperature 0.2 \
+  --top-p 0.95 \
+  --seed 42 \
+  --ollama-base-url "${OLLAMA_BASE_URL}" \
+  --ollama-keep-alive "${OLLAMA_KEEP_ALIVE}" \
+  --ollama-num-ctx "${OLLAMA_NUM_CTX}" \
+  --ollama-parallel-requests "${SERIAL_OLLAMA_REQUESTS}" \
+  --parallel-tasks 1 \
   --session-start-epoch "${SESSION_START_EPOCH}"
 
 echo "Generation is complete. Stop the FMLe instance after downloading the bundle."

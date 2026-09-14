@@ -284,8 +284,13 @@ def main() -> None:
                 )
                 if complete and not args.overwrite:
                     previous_timing = load_json(output_dir / "generation_timing.json") or {}
+                    previous_config = load_json(output_dir / "run_config.json") or {}
                     row["status"] = "skipped_existing"
                     row["generation_wall_seconds"] = previous_timing.get("generation_wall_seconds")
+                    row["ollama_parallel_requests"] = previous_config.get(
+                        "ollama_parallel_requests", row["ollama_parallel_requests"]
+                    )
+                    row["parallel_tasks"] = previous_config.get("parallel_tasks", row["parallel_tasks"])
                     print(f"Skipping complete run: {run_name}", flush=True)
                     write_matrix_summary(
                         summary_path, args, "running", started_epoch, invocation_started_epoch, rows
